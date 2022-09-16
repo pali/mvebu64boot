@@ -395,7 +395,7 @@ static bool validate_image_file(const uint8_t *image, size_t size)
 		return false;
 	}
 
-	if (le32_to_cpu(&hdr->bl_image_size) > size) {
+	if (le32_to_cpu(&hdr->bl_image_size) > size || le32_to_cpu(&hdr->prolog_size) + le32_to_cpu(&hdr->bl_image_size) > size) {
 		fprintf(stderr, "Error: Image file has larger bootloader than image size\n");
 		return false;
 	}
@@ -422,18 +422,18 @@ static bool validate_image_file(const uint8_t *image, size_t size)
 			fprintf(stderr, "Error: Image file has invalid extension\n");
 			return false;
 		}
-		if (le32_to_cpu(&ext->size) > size) {
+		if (le32_to_cpu(&ext->size) > size || (size_t)((const uint8_t *)ext - image) + le32_to_cpu(&ext->size) > size) {
 			fprintf(stderr, "Error: Image file has larger extension than image size\n");
 			return false;
 		}
-		ext = (const struct ext_header *)((const uint8_t *)ext + le32_to_cpu(&ext->size));
 		if (ext->type == EXT_TYPE_SECURITY) {
 			fprintf(stderr, "Error: Image file is signed\n");
 			return false;
 		}
+		ext = (const struct ext_header *)((const uint8_t *)ext + le32_to_cpu(&ext->size));
 	}
 
-	if ((const uint8_t *)ext - image > le32_to_cpu(&hdr->prolog_size)) {
+	if ((size_t)((const uint8_t *)ext - image) > le32_to_cpu(&hdr->prolog_size)) {
 		fprintf(stderr, "Error: Image file has larger extension than prolog size\n");
 		return false;
 	}
