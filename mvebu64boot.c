@@ -673,12 +673,13 @@ static void *write_boot_pattern_handler(void *arg)
 			fprintf(stderr, "Error: Failed to write boot pattern: %s\n", strerror(errno));
 			exit(1);
 		}
-		usleep(20 * 1000);
+		usleep(24 * 1000);
 	}
 }
 
 static bool loop_boot_pattern(int fd)
 {
+	struct xmodem_block block;
 	pthread_t write_thread;
 	uint8_t byte;
 	int ret;
@@ -714,13 +715,31 @@ static bool loop_boot_pattern(int fd)
 		return false;
 	}
 
-	if (tcflush(fd, TCIOFLUSH) != 0) {
-		fprintf(stderr, "Error: Failed to flush tty device: %s\n", strerror(errno));
+	if (tcflush(fd, TCOFLUSH) != 0) {
+		fprintf(stderr, "Error: Failed to flush output queue of tty device: %s\n", strerror(errno));
 		return false;
 	}
 
 	if (byte != NAK)
 		return false;
+
+	memset(&block, 0xff, sizeof(block));
+	if (!write_buf(fd, (void *)&block, sizeof(block))) {
+		fprintf(stderr, "Error: Failed to send sync sequence: %s\n", strerror(errno));
+		return false;
+	}
+
+	if (tcdrain(fd) != 0) {
+		fprintf(stderr, "Error: Failed to drain output queue of tty device: %s\n", strerror(errno));
+		return false;
+	}
+
+	usleep(24 * 1000);
+
+	if (tcflush(fd, TCIFLUSH) != 0) {
+		fprintf(stderr, "Error: Failed to flush input queue of tty device: %s\n", strerror(errno));
+		return false;
+	}
 
 	printf("BootROM is ready for image file transfer\n");
 	return true;
