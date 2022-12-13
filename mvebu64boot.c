@@ -141,20 +141,20 @@ static inline void print_progress(unsigned int cur, unsigned int max)
 {
 	char buf[20];
 	int len = snprintf(buf, sizeof(buf), "%u", max);
-	printf("%*u/%s", len, cur, buf);
+	fprintf(stderr, "%*u/%s", len, cur, buf);
 }
 
 static inline void xmodem_print_status(unsigned int cur_block, unsigned int tot_blocks, unsigned int retries, unsigned int cur_attempt, unsigned int tot_attempts)
 {
-	printf("\r%3u%% done (", 100 * cur_block / tot_blocks);
+	fprintf(stderr, "\r%3u%% done (", 100 * cur_block / tot_blocks);
 	if (retries != (unsigned int)-1) {
 		print_progress(cur_block * XMODEM_BLOCK_SIZE, tot_blocks * XMODEM_BLOCK_SIZE);
-		printf(" bytes, ");
+		fprintf(stderr, " bytes, ");
 		print_progress(cur_block, tot_blocks);
-		printf(" blocks, %2u retries, ", retries);
+		fprintf(stderr, " blocks, %2u retries, ", retries);
 	}
 	print_progress(cur_attempt, tot_attempts);
-	printf(" attempts)");
+	fprintf(stderr, " attempts)");
 	fflush(stdout);
 }
 
@@ -170,21 +170,21 @@ static bool xmodem_process_block(int fd, const struct xmodem_block *block, unsig
 		if (i >= 7)
 			usleep(2000 * 1000);
 		if (!write_buf(fd, (const uint8_t *)block, sizeof(*block))) {
-			printf("\n");
+			fprintf(stderr, "\n");
 			fprintf(stderr, "Error: Failed to send xmodem block: %s\n", strerror(errno));
 			return false;
 		}
 		if (allow_output && i == 0) {
 			xmodem_print_status(cur_block+1, tot_blocks, *retries, i+1, max_i);
-			printf("\n");
-			printf("Waiting for BootROM...\n");
+			fprintf(stderr, "\n");
+			fprintf(stderr, "Waiting for BootROM...\n");
 			output = false;
 		}
 retry:
 		if (!read_byte(fd, &byte, allow_output ? 10000 : 2000)) {
 			if (errno != ETIMEDOUT) {
 				if (output || !allow_output)
-					printf("\n");
+					fprintf(stderr, "\n");
 				fprintf(stderr, "Error: Failed to read byte: %s\n", strerror(errno));
 				return false;
 			}
@@ -194,23 +194,23 @@ retry:
 			if (!allow_output)
 				xmodem_print_status(cur_block+1, tot_blocks, *retries, cur_block+1 == tot_blocks ? (i+1) : 0, max_i);
 			if (output || (!allow_output && cur_block+1 == tot_blocks))
-				printf("\n");
+				fprintf(stderr, "\n");
 			return true;
 		}
 		if (allow_output && byte != NAK) {
 			if (!output) {
-				printf("\n");
+				fprintf(stderr, "\n");
 				output = true;
 			}
-			putchar(byte);
-			fflush(stdout);
+			fputc(byte, stderr);
+			fflush(stderr);
 			goto retry;
 		}
 		(*retries)++;
 	}
 
 	if (output || !allow_output)
-		printf("\n");
+		fprintf(stderr, "\n");
 	if (allow_output)
 		fprintf(stderr, "Error: %s\n", byte == NAK ? "BootROM rejected image" : "BootROM did not respond");
 	else
@@ -262,13 +262,13 @@ static bool xmodem_finish(int fd)
 		if (i >= 7)
 			usleep(2000 * 1000);
 		if (!write_byte(fd, EOT)) {
-			printf("\n");
+			fprintf(stderr, "\n");
 			fprintf(stderr, "Error: Failed to send EOT byte: %s\n", strerror(errno));
 			return false;
 		}
 		if (!read_byte(fd, &byte, 2000)) {
 			if (errno != ETIMEDOUT) {
-				printf("\n");
+				fprintf(stderr, "\n");
 				fprintf(stderr, "Error: Failed to read byte: %s\n", strerror(errno));
 				return false;
 			}
@@ -276,12 +276,12 @@ static bool xmodem_finish(int fd)
 		}
 		if (byte == ACK) {
 			xmodem_print_status(1, 1, -1, i+1, max_i);
-			printf("\n");
+			fprintf(stderr, "\n");
 			return true;
 		}
 	}
 
-	printf("\n");
+	fprintf(stderr, "\n");
 	fprintf(stderr, "Error: Failed to finish transfer: %s\n", byte == NAK ? "BootROM rejected it" : "BootROM did not respond");
 	return false;
 }
@@ -317,19 +317,19 @@ static bool transfer_image_file(int fd, const uint8_t *image)
 	const struct main_header *hdr = (const struct main_header *)image;
 	uint8_t seq = 1;
 
-	printf("Sending image prolog... (%u bytes)\n", (unsigned int)le32_to_cpu(&hdr->prolog_size));
+	fprintf(stderr, "Sending image prolog... (%u bytes)\n", (unsigned int)le32_to_cpu(&hdr->prolog_size));
 	if (!xmodem_transfer(fd, &seq, image, le32_to_cpu(&hdr->prolog_size), true))
 		return false;
 
-	printf("Sending image bootloader... (%u bytes)\n", (unsigned int)le32_to_cpu(&hdr->bl_image_size));
-	if (!xmodem_transfer(fd, &seq, image + le32_to_cpu(&hdr->prolog_size), le32_to_cpu(&hdr->bl_image_size), false))
+	fprintf(stderr, "Sending image bootloader... (%u bytes)\n", (unsigned int)le32_to_cpu(&hdr->bl_image_size));
+	if (!xmodem_transfer(fd, &seq, image + le32_to_cpu(&hdr->prolog_size), le32_to_cpu(&hdr->bl_image_size), true))
 		return false;
 
-	printf("Finishing...\n");
+	fprintf(stderr, "Finishing...\n");
 	if (!xmodem_finish(fd))
 		return false;
 
-	printf("Transfer of image file is complete\n");
+	fprintf(stderr, "Transfer of image file is complete\n");
 	return true;
 }
 
@@ -341,12 +341,12 @@ static bool patch_image_file(uint8_t *image)
 	uint32_t prolog_align = prolog_size % XMODEM_BLOCK_SIZE;
 
 	if (prolog_align > 0) {
-		printf("Aligning prolog size to xmodem block size\n");
+		fprintf(stderr, "Aligning prolog size to xmodem block size\n");
 		memmove(image + prolog_size + XMODEM_BLOCK_SIZE - prolog_align, image + prolog_size, bootloader_size);
 		memset(image + prolog_size, 0, XMODEM_BLOCK_SIZE - prolog_align);
 		prolog_size += XMODEM_BLOCK_SIZE - prolog_align;
 		cpu_to_le32(&hdr->prolog_size, prolog_size);
-		printf("Updating prolog checksum\n");
+		fprintf(stderr, "Updating prolog checksum\n");
 		cpu_to_le32(&hdr->prolog_checksum, checksum32(image, prolog_size) - le32_to_cpu(&hdr->prolog_checksum));
 	}
 
@@ -358,7 +358,7 @@ static bool validate_image_file(const uint8_t *image, size_t size)
 	const struct main_header *hdr = (const struct main_header *)image;
 	const struct ext_header *ext;
 
-	printf("Validating image file\n");
+	fprintf(stderr, "Validating image file\n");
 
 	if (size < sizeof(*hdr)) {
 		fprintf(stderr, "Error: Image file is too small\n");
@@ -447,7 +447,7 @@ static uint8_t *read_image_file(const char *file, size_t *size)
 	off_t len;
 	int fd;
 
-	printf("Reading image file '%s'\n", file);
+	fprintf(stderr, "Reading image file '%s'\n", file);
 
 	fd = open(file, O_RDONLY);
 	if (fd < 0) {
@@ -511,7 +511,7 @@ static void loop_terminal(int fd)
 	fd_set efds;
 	int state;
 
-	printf("\n");
+	fprintf(stderr, "\n");
 	restore_term = false;
 	kbs = NULL;
 	kbs_len = 0;
@@ -521,7 +521,7 @@ static void loop_terminal(int fd)
 		cfmakeraw(&tio);
 		if (tcsetattr(STDIN_FILENO, TCSANOW, &tio) == 0) {
 			restore_term = true;
-			printf("[Type Ctrl-\\ + c to quit]\r\n");
+			fprintf(stderr, "[Type Ctrl-\\ + c to quit]\r\n");
 			if (setupterm(NULL, STDOUT_FILENO, (int [1]){ 0 }) == 0) {
 				kbs = tigetstr("kbs");
 				if (kbs == (char *)-1)
@@ -652,7 +652,7 @@ static void loop_terminal(int fd)
 	if (restore_term)
 		tcsetattr(STDIN_FILENO, TCSANOW, &otio);
 
-	printf("\n");
+	fprintf(stderr, "\n");
 }
 
 static void *write_boot_pattern_handler(void *arg)
@@ -684,7 +684,7 @@ static bool loop_boot_pattern(int fd)
 	uint8_t byte;
 	int ret;
 
-	printf("Sending boot pattern...\n");
+	fprintf(stderr, "Sending boot pattern...\n");
 
 	ret = pthread_create(&write_thread, NULL, write_boot_pattern_handler, (void *)(intptr_t)fd);
 	if (ret) {
@@ -701,6 +701,8 @@ static bool loop_boot_pattern(int fd)
 			fprintf(stderr, "Error: Failed to read from tty device: %s\n", strerror(errno));
 			break;
 		}
+		fputc(byte, stderr);
+		fflush(stderr);
 	}
 
 	ret = pthread_cancel(write_thread);
@@ -741,7 +743,7 @@ static bool loop_boot_pattern(int fd)
 		return false;
 	}
 
-	printf("BootROM is ready for image file transfer\n");
+	fprintf(stderr, "BootROM is ready for image file transfer\n");
 	return true;
 }
 
@@ -751,7 +753,11 @@ static int open_tty(const char *device)
 	int flags;
 	int fd;
 
-	printf("Opening tty device '%s'\n", device);
+	if (strcmp(device, "-") == 0) {
+		return atoi(device+1);
+	}
+
+	fprintf(stderr, "Opening tty device '%s'\n", device);
 
 	fd = open(device, O_RDWR | O_NOCTTY | O_NONBLOCK);
 	if (fd < 0) {
